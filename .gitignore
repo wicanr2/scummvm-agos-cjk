@@ -1,0 +1,13 @@
+# 字型檔(倚天字模有版權;烘出來的重製品也不散布)
+*.dcjk
+tools/assets/
+# 遊戲原檔
+*.vga
+*.VGA
+gamepc
+tables[0-9]*
+*.ROM
+# 建置產物
+build/
+*.o
+__pycache__/
