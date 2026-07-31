@@ -1,3 +1,24 @@
+diff --git a/backends/graphics/opengl/opengl-graphics.cpp b/backends/graphics/opengl/opengl-graphics.cpp
+index b8899fc4..7df29bcd 100644
+--- a/backends/graphics/opengl/opengl-graphics.cpp
++++ b/backends/graphics/opengl/opengl-graphics.cpp
+@@ -720,7 +720,15 @@ void OpenGLGraphicsManager::updateScreen() {
+ 		// If we are in game, draw the cursor through scaler
+ 		// This has the disadvantage of having overlay (subtitles) drawn above it
+ 		// but the cursor will look nicer
+-		if (!_overlayInGUI && drawCursor) {
++		//
++		// [agos-cjk 修正] 條件從 _overlayInGUI 改為 _overlayVisible。上面那句註解說得很清楚:
++		// 走這條路的游標會被疊層蓋住。上游能接受, 是因為它假設「非 GUI 的疊層」只是字幕那種
++		// 局部的東西; 但疊層也可以被引擎用 showOverlay(false) 開起來鋪滿整個畫面(中文化即是),
++		// 這時游標會被蓋得完全看不見 —— 而且是靜悄悄的, 沒有 GL 錯誤、繪製函式也照樣被呼叫。
++		// 改用 _overlayVisible 之後, 只要疊層可見就留到第四步(疊層之後)再畫。
++		// 代價是這種情況下游標不經 scaler(略少一點修飾), 換到「游標一定看得見」。
++		// ScummVM 自己開 GUI 時兩個旗標同時為 true, 行為不變。
++		if (!_overlayVisible && drawCursor) {
+ 			renderCursor();
+ 			drawCursor = false;
+ 
 diff --git a/backends/graphics/surfacesdl/surfacesdl-graphics.cpp b/backends/graphics/surfacesdl/surfacesdl-graphics.cpp
 index 9a63088c..813d59c7 100644
 --- a/backends/graphics/surfacesdl/surfacesdl-graphics.cpp
