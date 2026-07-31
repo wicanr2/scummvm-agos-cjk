@@ -210,7 +210,7 @@ ASAN_OPTIONS="detect_leaks=0:halt_on_error=1:print_stacktrace=1" ./scummvm ...
 
 而且修復前那份堆疊與玩家 crash log 的堆疊**完全一致**,等於在本機重現了玩家的當機。
 
-### 3.4 上游既有的越界(非中文化造成)
+### 3.4 [坑★] `showOverlay(false)` 讓 backend 誤判,踩到比例校正的越界
 
 修復後的 ASan 掃描挖到另一顆,在 ScummVM 上游:
 
@@ -234,9 +234,47 @@ WRITE of size 1280
 **結論是「上游的程式碼、我們的使用方式觸發的」**:一般遊戲只在叫出 GUI 選單時
 短暫顯示 overlay,而中文化是**全程開著 overlay**,才會每幀走進那條校正路徑。
 
-處置:啟動器預設關閉 aspect 校正(玩家不受影響),並記錄待回報上游。
 **不要**因為「程式碼不是我寫的」就結案 —— 觸發條件是我們造成的,
-使用者遇到時也不會在意那行程式碼掛在誰的名下。
+使用者遇到時也不會在意那行程式碼掛在誰的名下。往下再挖一層就找得到修法。
+
+#### 根因:一個沒寫下來的隱含假設
+
+`internUpdateScreen()` 的兩處比例校正,條件都是 `!_overlayInGUI`:
+
+```cpp
+if (_videoMode.aspectRatioCorrection && !_overlayInGUI)
+    dst_y = real2Aspect(dst_y);
+```
+
+這等於假設**「overlay 顯示中」就是「ScummVM 自己的 GUI 開著」**。對 ScummVM 本身成立,
+因為它只在開選單時顯示 overlay。但 overlay 也可以被引擎用 `showOverlay(false)` 開啟並持續顯示
+—— 那個 `false` 的語意是「這不是 GUI 用途」,於是 `_overlayInGUI` 保持 false、
+backend 以為沒有 overlay,對已經是 overlay 尺寸(480 列、已含校正)的畫面**再校正一次**:
+
+```
+STRETCH: w=640 h=400 ... maxDstY=479   ← 正常:400 拉成 480,剛好填滿
+STRETCH: w=640 h=480 ... maxDstY=575   ← 越界:傳進來的高度已經是校正後的值
+```
+
+緩衝區只有 480 列(640 × 480 × 2 = 614400 bytes),寫到第 575 列就出界。
+
+#### 修法
+
+兩處判斷改用 `_overlayVisible`:
+
+```cpp
+if (_videoMode.aspectRatioCorrection && !_overlayVisible)
+```
+
+ScummVM 自己開 GUI 時兩個旗標同時為 true,兩條件等價,**對原本行為零影響**;
+只有「overlay 可見但非 GUI」才有差別,而那正是出問題的情況。
+修正後同條件 ASan 從 1 顆歸零,並確認 aspect 模式(640×480)畫面比例正常 ——
+這條改的是顯示邏輯,不能只驗「沒有崩潰」。
+
+> 教訓:**用別人的 API 時要留意它有沒有沒寫下來的隱含假設**。`showOverlay(false)`
+> 從簽名看只是「開 overlay、不是 GUI」,但 backend 內部把 `_overlayInGUI` 當成
+> 「overlay 開了沒」在用。這種假設通常要等到越界之後回頭看才會浮現 ——
+> 所以 ASan 的價值不只是抓 bug,是把「隱含假設被違反」變成看得見的訊號。
 
 > 方法論:判斷一顆越界屬於誰,靠的不是「函式在誰的檔案裡」,而是**對照實驗**。
 > 最乾淨的對照是同一個 binary 只切換一個開關(這裡是把譯表移走讓疊層不啟用),

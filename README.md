@@ -55,8 +55,9 @@ ScummVM 上游不會收「某個語言的中文化」這種改動,而等待與�
 這裡的作法是**對特定 ScummVM 版本維護 patch**(目前基準 v2.9.1),
 換版本時重對一次並記錄在 `patches/UPSTREAM.md`。
 
-其中若有屬於上游缺陷的部分(見 `AGOS_PITFALLS.md` §3.4),會標註清楚是上游的程式碼、
-由什麼條件觸發,方便日後判斷是否值得另外送 patch 給 ScummVM。
+patch 裡也包含一處 backend 的修正(`surfacesdl-graphics.cpp`):比例校正誤判
+「overlay 顯示中 = GUI 開著」,遇到持續顯示的疊層會把畫面校正兩次而寫出緩衝區。
+改動對 ScummVM 原本的行為零影響,根因與驗證見 `AGOS_PITFALLS.md` §3.4。
 
 ## 使用這套的專案
 
