@@ -282,6 +282,40 @@ ScummVM 自己開 GUI 時兩個旗標同時為 true,兩條件等價,**對原本�
 
 ---
 
+### 3.5 [坑★] 同一個誤判的第二處:游標殘影
+
+修好 3.4 之後,同一個假設在 SurfaceSDL 的**游標**路徑上又咬了一次 —— 症狀完全不同:
+滑鼠每移動一次就在原地留下一個游標,滿畫面都是箭頭。
+
+`undrawMouse()` 登記「要重畫的區域」時,把座標空間旗標傳成 `_overlayInGUI`:
+
+```cpp
+addDirtyRect(_mouseLastRect.x, ..., _overlayInGUI);   // 最後一個參數 = realCoordinates
+```
+
+但同一份 dirty rect 清單,在 `internUpdateScreen()` 是**照 `_overlayVisible` 決定來源**的:
+
+```cpp
+if (!_overlayVisible) { origSurf = _screen;        width = screenWidth;  scale1 = scaleFactor; }
+else                  { origSurf = _overlayscreen; width = overlayWidth; scale1 = 1; }
+```
+
+兩邊用不同的旗標判斷同一件事。以 `showOverlay(false)` 開啟疊層時,
+`_activeArea` 留在遊戲空間,游標矩形算出來是遊戲座標(如 20,20,16,16),
+卻被丟進以疊層座標消化的清單 —— 舊游標所在的區域永遠不會被重畫,殘影就留下來了。
+
+修法是在「疊層可見但非 GUI」時,用**與 `drawMouse()` 相同的換算**先轉到疊層座標
+(先 `real2Aspect` 做 200→240 的列映射,再乘 `scaleFactor`),再以 `realCoordinates = true` 登記。
+
+驗證用對照組最快:把譯表移走讓疊層不啟用,同樣移動滑鼠 —— 原版只有一個游標、位置正確,
+疊層開啟才有殘影,就確定是自己造成的,不必猜。
+
+> 這兩顆(3.4、3.5)是同一個根:**`_overlayInGUI` 在上游程式碼裡被當成「overlay 開了沒」在用**。
+> 找到第一顆之後,值得把整份後端 `grep -n _overlayInGUI` 掃一遍逐處判斷 ——
+> 同源缺陷通常不只一處,而它們的表徵可以差很遠(一個是崩潰,一個是畫面殘影)。
+
+---
+
 ## 4. 字型
 
 - **編碼用 Big5**。AGOS 走原始碼 patch,`getStringPtrByID` 直接回 Big5、

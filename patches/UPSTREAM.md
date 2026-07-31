@@ -107,3 +107,20 @@ ASAN_OPTIONS="detect_leaks=0:halt_on_error=1:print_stacktrace=1" \
   ./scummvm -p <game> --auto-detect --aspect-ratio --scale-factor=2
 # 需要引擎端有「持續顯示 overlay」的行為(本 patch 的中文疊層即是)
 ```
+
+
+### 游標殘影(**已修**)
+
+同一個 `_overlayInGUI` 誤判的第二處,在 `undrawMouse()`:dirty rect 的座標空間旗標傳
+`_overlayInGUI`,但 `internUpdateScreen()` 是照 `_overlayVisible` 決定來源表面與縮放。
+以 `showOverlay(false)` 開啟疊層時,游標矩形是遊戲座標卻被當成疊層座標消化,
+舊游標的區域不會被重畫 → 每移動一次留一個箭頭。
+
+修法:在「疊層可見但非 GUI」時,先用與 `drawMouse()` 相同的換算轉到疊層座標
+(`real2Aspect` 後乘 `scaleFactor`),再以 `realCoordinates = true` 登記。
+ScummVM 自己開 GUI 時走原本分支,行為不變。
+
+驗證:對照組(移走譯表讓疊層不啟用)只有一個游標且位置正確;疊層開啟時,
+連續移動四個位置,修正前留下四個箭頭、修正後只剩最後一個。
+
+細節與方法論見 `docs/AGOS_PITFALLS.md` §3.5。

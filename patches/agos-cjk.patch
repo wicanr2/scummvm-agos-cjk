@@ -1,5 +1,5 @@
 diff --git a/backends/graphics/surfacesdl/surfacesdl-graphics.cpp b/backends/graphics/surfacesdl/surfacesdl-graphics.cpp
-index 9a63088c..cf730171 100644
+index 9a63088c..813d59c7 100644
 --- a/backends/graphics/surfacesdl/surfacesdl-graphics.cpp
 +++ b/backends/graphics/surfacesdl/surfacesdl-graphics.cpp
 @@ -1412,7 +1412,13 @@ void SurfaceSdlGraphicsManager::internUpdateScreen() {
@@ -26,6 +26,62 @@ index 9a63088c..cf730171 100644
  					r->h = stretch200To240((uint8 *) _hwScreen->pixels, dstPitch, r->w, r->h, r->x, r->y, orig_dst_y * scale1, _videoMode.filtering, 	convertSDLPixelFormat(_hwScreen->format));
  #endif
  			}
+@@ -2410,11 +2416,53 @@ void SurfaceSdlGraphicsManager::undrawMouse() {
+ 	// The mouse is undrawn using virtual coordinates, i.e. they may be
+ 	// scaled and aspect-ratio corrected.
+ 
++	// [agos-cjk 修正] dirty rect 的「座標空間」旗標原本傳 _overlayInGUI,同樣隱含
++	// 「overlay 顯示中 = ScummVM 自己的 GUI」這個假設。以 showOverlay(false) 開啟的疊層
++	// 會讓 _activeArea 留在遊戲空間,游標矩形因此是遊戲座標;但 internUpdateScreen 只要
++	// _overlayVisible 就以疊層(scale1 = 1)為來源消化 dirty rect —— 遊戲座標被當成疊層
++	// 座標,舊游標所在的區域永遠不會被重畫,於是每移動一次就留下一個游標殘影。
++	// 這裡在「疊層可見但非 GUI」時,先用與 drawMouse() 相同的換算把矩形轉到疊層座標,
++	// 再以 realCoordinates = true 登記。ScummVM 自己開 GUI 時兩旗標同時為 true,
++	// 走的仍是原本的 else 分支,行為不變。
++	SDL_Rect cursorRects[2];
++	int numCursorRects = 0;
++
+ 	if (_mouseLastRect.w != 0 && _mouseLastRect.h != 0)
+-		addDirtyRect(_mouseLastRect.x, _mouseLastRect.y, _mouseLastRect.w, _mouseLastRect.h, _overlayInGUI);
++		cursorRects[numCursorRects++] = _mouseLastRect;
+ 
+ 	if (_mouseNextRect.w != 0 && _mouseNextRect.h != 0)
+-		addDirtyRect(_mouseNextRect.x, _mouseNextRect.y, _mouseNextRect.w, _mouseNextRect.h, _overlayInGUI);
++		cursorRects[numCursorRects++] = _mouseNextRect;
++
++	for (int i = 0; i < numCursorRects; ++i) {
++		if (!_overlayVisible || _overlayInGUI) {
++			addDirtyRect(cursorRects[i].x, cursorRects[i].y, cursorRects[i].w, cursorRects[i].h, _overlayInGUI);
++			continue;
++		}
++
++		int x = cursorRects[i].x;
++		int y = cursorRects[i].y;
++		int w = cursorRects[i].w;
++		int h = cursorRects[i].h;
++
++		if (y < 0) {
++			h += y;
++			y = 0;
++		}
++		if (h <= 0)
++			continue;
++
++#ifdef USE_ASPECT
++		// 與 drawMouse() 一致:先做 200→240 的列映射,再乘 scaleFactor。
++		if (_videoMode.aspectRatioCorrection) {
++			const int yBottom = real2Aspect(y + h - 1);
++			y = real2Aspect(y);
++			h = yBottom - y + 1;
++		}
++#endif
++
++		addDirtyRect(x * _videoMode.scaleFactor, y * _videoMode.scaleFactor,
++		             w * _videoMode.scaleFactor, h * _videoMode.scaleFactor, true);
++	}
+ }
+ 
+ void SurfaceSdlGraphicsManager::drawMouse() {
 diff --git a/engines/agos/agos.cpp b/engines/agos/agos.cpp
 index af27f131..0a53f293 100644
 --- a/engines/agos/agos.cpp
