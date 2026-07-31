@@ -1,3 +1,31 @@
+diff --git a/backends/graphics/surfacesdl/surfacesdl-graphics.cpp b/backends/graphics/surfacesdl/surfacesdl-graphics.cpp
+index 9a63088c..cf730171 100644
+--- a/backends/graphics/surfacesdl/surfacesdl-graphics.cpp
++++ b/backends/graphics/surfacesdl/surfacesdl-graphics.cpp
+@@ -1412,7 +1412,13 @@ void SurfaceSdlGraphicsManager::internUpdateScreen() {
+ 				dst_x *= scale1;
+ 				dst_y *= scale1;
+ 
+-				if (_videoMode.aspectRatioCorrection && !_overlayInGUI)
++				// [agos-cjk 修正] 判斷條件從 _overlayInGUI 改為 _overlayVisible。
++				// 原本假設「overlay 顯示 = ScummVM 自己的 GUI」,但 overlay 也可以被引擎
++				// 以 showOverlay(false)(非 GUI 用途)開啟並持續顯示 —— 此時 hwScreen 上的
++				// 內容已經是 overlay 尺寸(已含比例校正的 480 列),再套一次 200→240 校正
++				// 會讓 real2Aspect(479)=575 超出 480 列的緩衝區 → heap 越界。
++				// ScummVM 自己開 GUI 時兩個旗標同時為 true, 故此改動對原本行為無影響。
++				if (_videoMode.aspectRatioCorrection && !_overlayVisible)
+ 					dst_y = real2Aspect(dst_y);
+ 
+ 				_scaler->scale((byte *)srcSurf->pixels + (src_x + _maxExtraPixels) * bpp + (src_y + _maxExtraPixels) * srcPitch, srcPitch,
+@@ -1424,7 +1430,7 @@ void SurfaceSdlGraphicsManager::internUpdateScreen() {
+ 				r->h = dst_h * scale1;
+ 
+ #ifdef USE_ASPECT
+-				if (_videoMode.aspectRatioCorrection && orig_dst_y < height && !_overlayInGUI)
++				if (_videoMode.aspectRatioCorrection && orig_dst_y < height && !_overlayVisible)
+ 					r->h = stretch200To240((uint8 *) _hwScreen->pixels, dstPitch, r->w, r->h, r->x, r->y, orig_dst_y * scale1, _videoMode.filtering, 	convertSDLPixelFormat(_hwScreen->format));
+ #endif
+ 			}
 diff --git a/engines/agos/agos.cpp b/engines/agos/agos.cpp
 index af27f131..0a53f293 100644
 --- a/engines/agos/agos.cpp

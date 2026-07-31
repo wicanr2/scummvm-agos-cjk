@@ -28,48 +28,82 @@ make -j$(nproc)
 
 ## 已知與上游有關的問題
 
-### `stretch200To240Nearest` 越界(未修,有完整分析)
+### `stretch200To240Nearest` 越界(**已修**)
 
-**狀態**:已定位、可重現、**尚未修復**。玩家不受影響(建議啟動器預設關閉比例校正)。
+**狀態**:已定位、已修復、ASan 驗證通過。修正包含在 `agos-cjk.patch` 內
+(`backends/graphics/surfacesdl/surfacesdl-graphics.cpp`)。
 
-ASan 報告:
+#### 症狀
+
+開啟 aspect ratio correction 並讓 overlay 持續顯示時,ASan 報:
 
 ```
 ERROR: AddressSanitizer: heap-buffer-overflow
 WRITE of size 1280
-    #0 memcpy
-    #1 stretch200To240Nearest(...)            graphics/scaler/aspect.cpp:208
-    #2 stretch200To240(...)
+    #1 stretch200To240Nearest(...)            graphics/scaler/aspect.cpp
     #3 SurfaceSdlGraphicsManager::internUpdateScreen()
-0x... is located 736 bytes BEFORE 614400-byte region
-allocated by SurfaceSdlGraphicsManager::SDL_SetVideoMode()
 ```
 
-注意越界方向是 **underflow**(寫在緩衝區之前),不是溢出。
-614400 bytes = 640 × 480 × 2,是 SDL 的畫面緩衝區。
+#### 根因
 
-**觸發條件**(對照實驗,同一個 binary 只切換一個開關):
+`internUpdateScreen()` 裡兩處 aspect 校正的條件都是 `!_overlayInGUI`:
 
-| 條件 | 結果 |
+```cpp
+if (_videoMode.aspectRatioCorrection && !_overlayInGUI)
+    dst_y = real2Aspect(dst_y);
+...
+if (_videoMode.aspectRatioCorrection && orig_dst_y < height && !_overlayInGUI)
+    r->h = stretch200To240(...);
+```
+
+這裡有一個沒被寫下來的隱含假設:**「overlay 顯示中」等於「ScummVM 自己的 GUI 開著」**。
+對 ScummVM 本身成立,因為它只在開選單時顯示 overlay。
+
+但 overlay 也可以被引擎用 `showOverlay(false)` 開啟並**持續顯示** ——
+`false` 的語意是「這不是 GUI 用途」,於是 `_overlayInGUI` 保持 false,
+backend 就以為沒有 overlay,照常對畫面做 200→240 校正。
+而此時 hwScreen 上的內容已經是 overlay 尺寸(480 列,已含校正),再校正一次:
+
+```
+real2Aspect(479) = 479 + 480/5 = 575     ← 目標列
+緩衝區只有 480 列(640 × 480 × 2 = 614400 bytes)
+```
+
+診斷用的實際參數(在 `stretch200To240Nearest` 開頭加 log 印出來的):
+
+```
+STRETCH: w=640 h=400 ... maxDstY=479   ← 正常:400 拉成 480,剛好填滿
+STRETCH: w=640 h=480 ... maxDstY=575   ← 越界:傳進來的高度已經是校正後的值
+```
+
+#### 修法
+
+把那兩處的判斷從 `_overlayInGUI` 換成 `_overlayVisible`(兩者都是
+`WindowedGraphicsManager` 的成員):
+
+```cpp
+if (_videoMode.aspectRatioCorrection && !_overlayVisible)
+```
+
+**對 ScummVM 原本的行為零影響** —— 它自己開 GUI 時 `_overlayInGUI` 與 `_overlayVisible`
+同時為 true,兩個條件等價;只有「overlay 可見但非 GUI」這種用法才有差別,
+而那正是出問題的情況。
+
+#### 驗證
+
+| 條件 | ASan |
 |---|---|
-| 中文疊層開啟 + aspect ratio correction | 報越界 |
-| 中文疊層關閉(移走譯表即可) | 乾淨 |
-| vanilla ScummVM(完全未套 patch) | 乾淨 |
+| 修正前(疊層開啟 + aspect 校正) | 1 顆越界 |
+| **修正後(同條件)** | **0** |
+| 疊層關閉 / vanilla ScummVM | 0(本來就不會走到) |
 
-**判讀**:程式碼是上游的(這個 repo 沒有碰 `backends/` 或 `graphics/scaler/`),
-但觸發條件是中文化造成的 —— 一般遊戲只在叫出 GUI 選單時**短暫**顯示 overlay,
-而中文化是**全程開著** overlay,才會每幀走進那條比例校正路徑。
+另外確認 aspect 模式(640×480)下畫面顯示正常、比例正確 —— 這條改的是顯示邏輯,
+不能只驗「沒有崩潰」。
 
-**還沒修的理由**:`internUpdateScreen` 裡有兩處 `stretch200To240` 呼叫,
-遊戲畫面那條會帶入非零的 `srcY / origSrcY`(來自 dirty rect 系統),
-而 `startSrcPtr = buf + (srcY - origSrcY) * pitch` 在兩者關係不如預期時會指到緩衝區之前。
-要正確修必須先弄懂 SurfaceSDL 的 dirty rect 與 aspect 座標系統怎麼配合,
-在那之前硬改邊界只會把症狀藏起來。
-
-**重現方法**:
+**重現方法**(給想自己確認的人):
 
 ```bash
-# 用 ASan 版 binary,開啟比例校正,並讓中文疊層處於啟用狀態
 ASAN_OPTIONS="detect_leaks=0:halt_on_error=1:print_stacktrace=1" \
   ./scummvm -p <game> --auto-detect --aspect-ratio --scale-factor=2
+# 需要引擎端有「持續顯示 overlay」的行為(本 patch 的中文疊層即是)
 ```
