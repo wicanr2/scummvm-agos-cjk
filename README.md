@@ -63,6 +63,14 @@ patch 裡也包含一處 backend 的修正(`surfacesdl-graphics.cpp`):比例校�
 
 - [古堡禁地 Elvira: Mistress of the Dark (1990) 繁中化](https://github.com/wicanr2/Elvira-Mistress_of_the_Dark_1990-cht)
 
+## 案例研究
+
+[`Can't load 002.VGA` 追查報告](https://github.com/wicanr2/Elvira-Mistress_of_the_Dark_1990-cht/blob/main/docs/BUG_002VGA_ZONE0.md)
+—— 玩家撞牆就中止,追到最後是遊戲腳本的條件分派缺預設分支,讓畫面編號停在 0。
+裡面有完整的反組譯過程(含 `dumpAllSubroutines()` 只 dump 記憶體現有子程式這個坑)、
+為什麼「把載入改成不致命」反而更糟,以及修法的驗證與有效性威脅。
+對應本 repo 的 `AGOS_PITFALLS.md` §3.7。
+
 ## 授權
 
 引擎 patch 衍生自 ScummVM,依 **GPLv3** 釋出。
