@@ -16,6 +16,7 @@ AGOS 跟 SCUMM 不一樣 —— **丟字型檔進去是沒用的**。它的文�
 | `src/` | 中文化新增的檔案(字型／譯表載入器) |
 | `tools/` | 字型烘焙(TTF 與倚天點陣字)、疊層座標回歸測試、ASan 掃描 |
 | `docs/` | [**AGOS_PITFALLS.md**](docs/AGOS_PITFALLS.md) — 踩過的坑總覽,每條含根因與驗證方法 |
+| `docs/` | [**ASAN_GUIDE.md**](docs/ASAN_GUIDE.md) — 用 ASan 抓疊層越界:怎麼編、五個情境怎麼跑、報告怎麼讀 |
 
 ## 核心解法:用 overlay 層當 hi-res compositor
 
