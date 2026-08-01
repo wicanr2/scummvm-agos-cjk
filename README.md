@@ -66,6 +66,12 @@ patch 裡也包含一處 backend 的修正(`surfacesdl-graphics.cpp`):比例校�
 
 ## 案例研究
 
+[**不會當場炸的越界:zone 上界失守與隨機當機**](docs/BUG_ZONE_BOUNDS.md)
+—— 圖號 ÷ 100 算出的 zone 可達 655,陣列只有 450,而上游是先取元素才做邊界檢查。
+越界的位置落在 `AGOSEngine` 物件內部,所以不會當場崩潰,而是拿到垃圾指標後在無關的地方倒下。
+**ASan 抓不到這一類**(同一塊配置內部的越界),五輪掃描全乾淨,是讀程式碼才發現的。
+內含上界怎麼從實際資料量出來、為什麼加大陣列解決不了,以及一個假驗證的教訓。
+
 [`Can't load 002.VGA` 追查報告](https://github.com/wicanr2/Elvira-Mistress_of_the_Dark_1990-cht/blob/main/docs/BUG_002VGA_ZONE0.md)
 —— 玩家撞牆就中止,追到最後是遊戲腳本的條件分派缺預設分支,讓畫面編號停在 0。
 裡面有完整的反組譯過程(含 `dumpAllSubroutines()` 只 dump 記憶體現有子程式這個坑)、
