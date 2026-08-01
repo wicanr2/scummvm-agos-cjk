@@ -1394,7 +1394,7 @@ index db3ba144..e8bd8dbe 100644
  
  		if (amount == 0)
 diff --git a/engines/agos/gfx.cpp b/engines/agos/gfx.cpp
-index 06dfaef6..d341aaa3 100644
+index 06dfaef6..373bd73e 100644
 --- a/engines/agos/gfx.cpp
 +++ b/engines/agos/gfx.cpp
 @@ -1035,11 +1035,11 @@ void AGOSEngine::verticalScroll(VC10_state *state) {
@@ -1434,7 +1434,7 @@ index 06dfaef6..d341aaa3 100644
  		Graphics::Surface *screen = _system->lockScreen();
  
  		int src0Pitch = _backBuf->pitch;
-@@ -1138,6 +1154,19 @@ void AGOSEngine::animate(uint16 windowNum, uint16 zoneNum, uint16 vgaSpriteId, i
+@@ -1138,6 +1154,28 @@ void AGOSEngine::animate(uint16 windowNum, uint16 zoneNum, uint16 vgaSpriteId, i
  	vsp->id = vgaSpriteId;
  	vsp->zoneNum = zoneNum;
  
@@ -1443,6 +1443,15 @@ index 06dfaef6..d341aaa3 100644
 +	// 上游是直接 error() 中止 —— 對玩家而言等於一次當機、進度全失。
 +	// 注意不能只把 loadZone 改成非致命: 下面的 for(;;) 靠 vgaFile1 非 null 才跳出,
 +	// 載入失敗會變成無窮迴圈。所以在進迴圈前先試載一次, 真的沒有就跳過這張圖。
++	// 上界先擋: 圖號是 16-bit(最多 65535), 除以 100 之後 zone 可到 655,
++	// 而 _vgaBufferPointers 只有 450 個項目 —— 直接索引會越界讀。
++	// 上游的 for(;;) 迴圈也是先取 &_vgaBufferPointers[zoneNum] 才進 loadZone 的
++	// CHECK_BOUNDS, 所以越界讀發生在斷言之前。
++	if (zoneNum >= ARRAYSIZE(_vgaBufferPointers)) {
++		warning("%s: zone %d 超出範圍(sprite id %d), 跳過此圖", __FUNCTION__, zoneNum, vgaSpriteId);
++		return;
++	}
++
 +	if (_vgaBufferPointers[zoneNum].vgaFile1 == nullptr) {
 +		loadZone(zoneNum, false);
 +		if (_vgaBufferPointers[zoneNum].vgaFile1 == nullptr) {
@@ -1454,7 +1463,7 @@ index 06dfaef6..d341aaa3 100644
  	for (;;) {
  		vpe = &_vgaBufferPointers[zoneNum];
  		_curVgaFile1 = vpe->vgaFile1;
-@@ -1224,6 +1253,19 @@ void AGOSEngine::setImage(uint16 vgaSpriteId, bool vgaScript) {
+@@ -1224,6 +1262,28 @@ void AGOSEngine::setImage(uint16 vgaSpriteId, bool vgaScript) {
  
  	zoneNum = (getGameType() == GType_PN) ? 0 : vgaSpriteId / 100;
  
@@ -1463,6 +1472,15 @@ index 06dfaef6..d341aaa3 100644
 +	// 上游是直接 error() 中止 —— 對玩家而言等於一次當機、進度全失。
 +	// 注意不能只把 loadZone 改成非致命: 下面的 for(;;) 靠 vgaFile1 非 null 才跳出,
 +	// 載入失敗會變成無窮迴圈。所以在進迴圈前先試載一次, 真的沒有就跳過這張圖。
++	// 上界先擋: 圖號是 16-bit(最多 65535), 除以 100 之後 zone 可到 655,
++	// 而 _vgaBufferPointers 只有 450 個項目 —— 直接索引會越界讀。
++	// 上游的 for(;;) 迴圈也是先取 &_vgaBufferPointers[zoneNum] 才進 loadZone 的
++	// CHECK_BOUNDS, 所以越界讀發生在斷言之前。
++	if (zoneNum >= ARRAYSIZE(_vgaBufferPointers)) {
++		warning("%s: zone %d 超出範圍(sprite id %d), 跳過此圖", __FUNCTION__, zoneNum, vgaSpriteId);
++		return;
++	}
++
 +	if (_vgaBufferPointers[zoneNum].vgaFile1 == nullptr) {
 +		loadZone(zoneNum, false);
 +		if (_vgaBufferPointers[zoneNum].vgaFile1 == nullptr) {
@@ -1474,7 +1492,7 @@ index 06dfaef6..d341aaa3 100644
  	for (;;) {
  		vpe = &_vgaBufferPointers[zoneNum];
  		_curVgaFile1 = vpe->vgaFile1;
-@@ -1539,7 +1581,7 @@ void AGOSEngine::setWindowImage(uint16 mode, uint16 vgaSpriteId, bool specialCas
+@@ -1539,7 +1599,7 @@ void AGOSEngine::setWindowImage(uint16 mode, uint16 vgaSpriteId, bool specialCas
  				dst += screen->pitch;
  			}
  
