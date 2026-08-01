@@ -369,6 +369,86 @@ SurfaceSDL 迴歸乾淨(單一游標、無殘影)。
 >    一次就中。二分法問的是「哪一行有關」,而真正該問的是「這一幀到底發生了什麼」。
 
 
+### 3.7 [坑★] 遊戲腳本沒有 default 分支 → 圖號 0 → 上游直接 `error()` 中止
+
+玩家回報:往前走撞到欄杆或牆壁時遊戲整個中止,訊息是
+
+```
+ERROR: loadVGAVideoFile: Can't load 002.VGA!
+```
+
+**先確認不是自己造成的**:同一個玩家在 SurfaceSDL 與 OpenGL 兩條完全不同的顯示路徑下都遇到;
+中文化的 patch 全文 grep 過,沒有碰任何 zone 載入的程式碼(唯一寫腳本變數的地方是 F7 無敵的
+`_variableArray[5]`,而玩家的 log 沒有 `CHT: godmode` 訊息,代表他沒按過)。版本也一致
+(`Floppy/DOS/English`)。
+
+#### 根因
+
+`002.VGA` 是 **zone 0**。`setImage()` 用 `vgaSpriteId / 100` 算 zone,所以**圖號小於 100
+就會落到 zone 0**,而 Elvira 1 的 DOS floppy 版沒有 zone 0 的檔(只有 01–03、06–09、17–74)。
+
+往下追要靠反組譯。VGA 腳本(`dumpAllVgaScriptFiles()`)裡沒有小於 100 的圖號;
+真正的來源在 GAMEPC 子程式 —— 有幾處 `PICTURE` 的參數是**變數**而不是常數:
+
+```
+PICTURE [221] 4      ; 子程式 50
+PICTURE [222] 4      ; 子程式 53
+PICTURE [223] 4      ; 子程式 48/51/55
+```
+
+而這三個變數只在 `SUB_74` 被指派,那是一段條件 dispatch:
+
+```
+CHILD_FR2_IS SUBJECT_ITEM <物件A> ->  SET 221 300   SET 222 301   SET 223 302 …
+CHILD_FR2_IS SUBJECT_ITEM <物件B> ->  SET 221 5000  SET 222 5001  SET 223 5002 …
+…共 8 組…
+```
+
+**八個條件都不符合時沒有 default 分支** —— 221/222/223 保持原值,若從未被設定過就是 0。
+接著 `PICTURE [221]` 把 0 送進 `setImage`,zone 算成 0,上游 `loadVGAVideoFile` 找不到檔案就
+`error()` 中止整個遊戲。對玩家而言等於當機加進度全失。
+
+> 反組譯的注意事項:`dumpAllSubroutines()` **只會 dump 當下載入在記憶體裡的子程式**。
+> Elvira 1 的腳本分散在 11 個 `TABLES*` 分頁,要先跑一輪 `loadTablesIntoMem(id)` 把全部載進來
+> 才看得到完整的圖(第一次只 dump 到約 13 萬行,補上載入迴圈後是 17 萬行,
+> `SET 221` 那 8 組就是補上之後才出現的)。
+
+#### 修法
+
+這是遊戲資料的邏輯漏洞,不是我們能改的;能改的是**不要讓它殺掉遊戲**。
+在 `setImage()` 與 `animate()` 進主迴圈前先試載一次,真的沒有就印警告並跳過這張圖:
+
+```cpp
+if (_vgaBufferPointers[zoneNum].vgaFile1 == nullptr) {
+    loadZone(zoneNum, false);
+    if (_vgaBufferPointers[zoneNum].vgaFile1 == nullptr) {
+        warning("%s: zone %d 載不到(sprite id %d), 跳過此圖", __FUNCTION__, zoneNum, vgaSpriteId);
+        return;
+    }
+}
+```
+
+**[HARD] 不能只是把 `loadZone` 改成非致命。** 那兩個函式的主迴圈長這樣:
+
+```cpp
+for (;;) {
+    vpe = &_vgaBufferPointers[zoneNum];
+    if (vpe->vgaFile1 != nullptr) break;
+    loadZone(zoneNum);
+}
+```
+
+載入失敗時 `vgaFile1` 永遠是 null,迴圈**永遠跳不出來** —— 把致命錯誤換成當場凍結,更糟。
+所以一定要在進迴圈前擋。
+
+驗證:強制走一次失敗路徑(`setImage(99)` → zone 0),修正後印警告並繼續跑滿測試時間;
+正常遊玩 80 次移動防護觸發 0 次(完全休眠),畫面與對白正常。
+
+> 順帶查證過:ScummVM 上游到 2026.3.0 為止(v2.9.1 之後三個大版本、58 個 AGOS commit)
+> 都沒有處理這個情況,AGOS 的維護集中在 Atari ST / Amiga / Acorn 的音樂與顯示。
+> 換言之升級 ScummVM 版本救不了這顆,得自己擋。
+
+
 ---
 
 ## 4. 字型
