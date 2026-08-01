@@ -1394,10 +1394,29 @@ index db3ba144..e8bd8dbe 100644
  
  		if (amount == 0)
 diff --git a/engines/agos/gfx.cpp b/engines/agos/gfx.cpp
-index 06dfaef6..373bd73e 100644
+index 06dfaef6..ee933925 100644
 --- a/engines/agos/gfx.cpp
 +++ b/engines/agos/gfx.cpp
-@@ -1035,11 +1035,11 @@ void AGOSEngine::verticalScroll(VC10_state *state) {
+@@ -32,6 +32,18 @@
+ 
+ namespace AGOS {
+ 
++// [agos-cjk] Elvira 1 專用的 zone 上界。
++//
++// 由實際資料推出來的,不是猜的:
++//   靜態盤點全部 GAMEPC 子程式與 VGA 腳本, 最大圖號是 7403 → zone 74;
++//   遊戲檔裡實際存在的最高 zone 也是 74(741.vga / 742.vga)。
++//   取 74 x 1.1 = 81.4, 進位成 82 當安全邊際。
++//
++// 其他 subengine 不套這條, 仍用 _vgaBufferPointers 的陣列大小當上界
++//(zone 需求最高的是 Feeble Files 的 450)。
++static const uint kChtElvira1ZoneLimit = 82;
++
++
+ byte *vc10_depackColumn(VC10_state * vs) {
+ 	int8 a = vs->depack_cont;
+ 	const byte *src = vs->srcPtr;
+@@ -1035,11 +1047,11 @@ void AGOSEngine::verticalScroll(VC10_state *state) {
  }
  
  Graphics::Surface *AGOSEngine::getBackendSurface() const {
@@ -1411,7 +1430,7 @@ index 06dfaef6..373bd73e 100644
  		int x = 0;
  		int y = 0;
  		int w = _screenWidth;
-@@ -1052,6 +1052,22 @@ void AGOSEngine::updateBackendSurface(Common::Rect *area) const {
+@@ -1052,6 +1064,22 @@ void AGOSEngine::updateBackendSurface(Common::Rect *area) const {
  			h = area->height();
  		}
  
@@ -1434,7 +1453,7 @@ index 06dfaef6..373bd73e 100644
  		Graphics::Surface *screen = _system->lockScreen();
  
  		int src0Pitch = _backBuf->pitch;
-@@ -1138,6 +1154,28 @@ void AGOSEngine::animate(uint16 windowNum, uint16 zoneNum, uint16 vgaSpriteId, i
+@@ -1138,6 +1166,31 @@ void AGOSEngine::animate(uint16 windowNum, uint16 zoneNum, uint16 vgaSpriteId, i
  	vsp->id = vgaSpriteId;
  	vsp->zoneNum = zoneNum;
  
@@ -1447,8 +1466,11 @@ index 06dfaef6..373bd73e 100644
 +	// 而 _vgaBufferPointers 只有 450 個項目 —— 直接索引會越界讀。
 +	// 上游的 for(;;) 迴圈也是先取 &_vgaBufferPointers[zoneNum] 才進 loadZone 的
 +	// CHECK_BOUNDS, 所以越界讀發生在斷言之前。
-+	if (zoneNum >= ARRAYSIZE(_vgaBufferPointers)) {
-+		warning("%s: zone %d 超出範圍(sprite id %d), 跳過此圖", __FUNCTION__, zoneNum, vgaSpriteId);
++	const uint chtZoneLimit = (getGameType() == GType_ELVIRA1)
++	        ? kChtElvira1ZoneLimit : (uint)ARRAYSIZE(_vgaBufferPointers);
++	if (zoneNum >= chtZoneLimit) {
++		warning("%s: zone %d 超出上界 %u(sprite id %d), 跳過此圖",
++		        __FUNCTION__, zoneNum, chtZoneLimit, vgaSpriteId);
 +		return;
 +	}
 +
@@ -1463,7 +1485,7 @@ index 06dfaef6..373bd73e 100644
  	for (;;) {
  		vpe = &_vgaBufferPointers[zoneNum];
  		_curVgaFile1 = vpe->vgaFile1;
-@@ -1224,6 +1262,28 @@ void AGOSEngine::setImage(uint16 vgaSpriteId, bool vgaScript) {
+@@ -1224,6 +1277,31 @@ void AGOSEngine::setImage(uint16 vgaSpriteId, bool vgaScript) {
  
  	zoneNum = (getGameType() == GType_PN) ? 0 : vgaSpriteId / 100;
  
@@ -1476,8 +1498,11 @@ index 06dfaef6..373bd73e 100644
 +	// 而 _vgaBufferPointers 只有 450 個項目 —— 直接索引會越界讀。
 +	// 上游的 for(;;) 迴圈也是先取 &_vgaBufferPointers[zoneNum] 才進 loadZone 的
 +	// CHECK_BOUNDS, 所以越界讀發生在斷言之前。
-+	if (zoneNum >= ARRAYSIZE(_vgaBufferPointers)) {
-+		warning("%s: zone %d 超出範圍(sprite id %d), 跳過此圖", __FUNCTION__, zoneNum, vgaSpriteId);
++	const uint chtZoneLimit = (getGameType() == GType_ELVIRA1)
++	        ? kChtElvira1ZoneLimit : (uint)ARRAYSIZE(_vgaBufferPointers);
++	if (zoneNum >= chtZoneLimit) {
++		warning("%s: zone %d 超出上界 %u(sprite id %d), 跳過此圖",
++		        __FUNCTION__, zoneNum, chtZoneLimit, vgaSpriteId);
 +		return;
 +	}
 +
@@ -1492,7 +1517,7 @@ index 06dfaef6..373bd73e 100644
  	for (;;) {
  		vpe = &_vgaBufferPointers[zoneNum];
  		_curVgaFile1 = vpe->vgaFile1;
-@@ -1539,7 +1599,7 @@ void AGOSEngine::setWindowImage(uint16 mode, uint16 vgaSpriteId, bool specialCas
+@@ -1539,7 +1617,7 @@ void AGOSEngine::setWindowImage(uint16 mode, uint16 vgaSpriteId, bool specialCas
  				dst += screen->pitch;
  			}
  

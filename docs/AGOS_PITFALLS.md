@@ -481,18 +481,52 @@ for (;;) {
 
 #### 修法
 
-在碰陣列**之前**先擋上界,`setImage()` 與 `animate()` 各一份:
+在碰陣列**之前**先擋上界,`setImage()` 與 `animate()` 各一份。上界對 Elvira 1 做特例,
+其餘 subengine 沿用陣列大小:
 
 ```cpp
-if (zoneNum >= ARRAYSIZE(_vgaBufferPointers)) {
-    warning("%s: zone %d 超出範圍(sprite id %d), 跳過此圖", __FUNCTION__, zoneNum, vgaSpriteId);
+static const uint kChtElvira1ZoneLimit = 82;   // 74 x 1.1, 推導見下
+
+const uint chtZoneLimit = (getGameType() == GType_ELVIRA1)
+        ? kChtElvira1ZoneLimit : (uint)ARRAYSIZE(_vgaBufferPointers);
+if (zoneNum >= chtZoneLimit) {
+    warning("%s: zone %d 超出上界 %u(sprite id %d), 跳過此圖",
+            __FUNCTION__, zoneNum, chtZoneLimit, vgaSpriteId);
     return;
 }
 ```
 
-**[HARD] 上界要用陣列大小,不要用 `_numZone`。** Elvira 1 的 `_numZone` 是 74,而遊戲檔裡
-**確實有 `741.vga` / `742.vga`,也就是 zone 74**;照慣例寫 `zoneNum >= _numZone` 會把合法的
-zone 74 擋掉。看起來更嚴謹的檢查反而誤擋,這種地方寧可保守。
+**82 是從資料量出來的,不是猜的:**
+
+| 來源 | 最大值 | 對應 zone |
+|---|---|---|
+| GAMEPC 子程式的 `PICTURE` 常數 | 7403 | 74 |
+| `ANIMATE` 常數 | 7201 | 72 |
+| VGA 腳本的 `SET_WINDOW_IMAGE` | 6602 | 66 |
+| 以變數當圖號者,變數的最大指派值 | 5632 | 56 |
+| 遊戲檔實際存在的最高 zone | — | **74**(`741.vga` / `742.vga`)|
+| 執行期實測(220 次隨機操作走到的最高) | 6903 | 69 |
+
+靜態上界與檔案上界一致都是 74,取 74 × 1.1 = 81.4,進位 **82**。
+
+`_numZone` 不能拿來當這個上界:Elvira 1 的 `_numZone` 是 74,而 zone 74 **確實會用到**,
+照慣例寫 `>= _numZone` 會誤擋合法內容。
+
+驗證時特別確認了這件事——把四種圖號各打一次,並實際 `loadZone(74)`:
+
+| 圖號 | zone | 判定 | 備註 |
+|---|---|---|---|
+| 7403 | 74 | 放行 | `loadZone(74)` 實測載入成功 |
+| 8200 | 82 | 拒絕 | 剛好到上界 |
+| 65000 | 650 | 拒絕 | 遠超陣列 |
+| 99 | 0 | 上界放行 | 由第二道「檔案不存在」擋下 |
+
+另外跑 200 次正常操作,誤擋 0 次、缺檔跳過 0 次。
+
+> 測試方法本身也踩過一個坑:一開始想直接在引擎初始化時呼叫 `setImage(7403)` 驗證,
+> 結果 segfault ——`setImage()` 的完整流程在 VGA 子系統備妥前呼叫本來就不合法,
+> 那是測試無效,不是修正有問題。而前面幾項之所以「通過」,是因為它們都走防護的提早返回,
+> 根本沒進到函式本體。**用合成呼叫驗證防護時,要確認自己驗到的是哪一條路徑。**
 
 #### 為什麼不是「把陣列開大」
 
