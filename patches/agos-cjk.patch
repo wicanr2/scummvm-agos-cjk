@@ -1394,7 +1394,7 @@ index db3ba144..e8bd8dbe 100644
  
  		if (amount == 0)
 diff --git a/engines/agos/gfx.cpp b/engines/agos/gfx.cpp
-index 06dfaef6..e11a175c 100644
+index 06dfaef6..d341aaa3 100644
 --- a/engines/agos/gfx.cpp
 +++ b/engines/agos/gfx.cpp
 @@ -1035,11 +1035,11 @@ void AGOSEngine::verticalScroll(VC10_state *state) {
@@ -1434,7 +1434,47 @@ index 06dfaef6..e11a175c 100644
  		Graphics::Surface *screen = _system->lockScreen();
  
  		int src0Pitch = _backBuf->pitch;
-@@ -1539,7 +1555,7 @@ void AGOSEngine::setWindowImage(uint16 mode, uint16 vgaSpriteId, bool specialCas
+@@ -1138,6 +1154,19 @@ void AGOSEngine::animate(uint16 windowNum, uint16 zoneNum, uint16 vgaSpriteId, i
+ 	vsp->id = vgaSpriteId;
+ 	vsp->zoneNum = zoneNum;
+ 
++	// [agos-cjk 修正] 缺 zone 檔時不要 error() 把整個遊戲殺掉。
++	// 玩家回報撞牆時偶發 "Can't load 002.VGA"(zone 0 = sprite id < 100, 該版本沒有這組檔),
++	// 上游是直接 error() 中止 —— 對玩家而言等於一次當機、進度全失。
++	// 注意不能只把 loadZone 改成非致命: 下面的 for(;;) 靠 vgaFile1 非 null 才跳出,
++	// 載入失敗會變成無窮迴圈。所以在進迴圈前先試載一次, 真的沒有就跳過這張圖。
++	if (_vgaBufferPointers[zoneNum].vgaFile1 == nullptr) {
++		loadZone(zoneNum, false);
++		if (_vgaBufferPointers[zoneNum].vgaFile1 == nullptr) {
++			warning("%s: zone %d 載不到(sprite id %d), 跳過此圖以免中止遊戲", __FUNCTION__, zoneNum, vgaSpriteId);
++			return;
++		}
++	}
++
+ 	for (;;) {
+ 		vpe = &_vgaBufferPointers[zoneNum];
+ 		_curVgaFile1 = vpe->vgaFile1;
+@@ -1224,6 +1253,19 @@ void AGOSEngine::setImage(uint16 vgaSpriteId, bool vgaScript) {
+ 
+ 	zoneNum = (getGameType() == GType_PN) ? 0 : vgaSpriteId / 100;
+ 
++	// [agos-cjk 修正] 缺 zone 檔時不要 error() 把整個遊戲殺掉。
++	// 玩家回報撞牆時偶發 "Can't load 002.VGA"(zone 0 = sprite id < 100, 該版本沒有這組檔),
++	// 上游是直接 error() 中止 —— 對玩家而言等於一次當機、進度全失。
++	// 注意不能只把 loadZone 改成非致命: 下面的 for(;;) 靠 vgaFile1 非 null 才跳出,
++	// 載入失敗會變成無窮迴圈。所以在進迴圈前先試載一次, 真的沒有就跳過這張圖。
++	if (_vgaBufferPointers[zoneNum].vgaFile1 == nullptr) {
++		loadZone(zoneNum, false);
++		if (_vgaBufferPointers[zoneNum].vgaFile1 == nullptr) {
++			warning("%s: zone %d 載不到(sprite id %d), 跳過此圖以免中止遊戲", __FUNCTION__, zoneNum, vgaSpriteId);
++			return;
++		}
++	}
++
+ 	for (;;) {
+ 		vpe = &_vgaBufferPointers[zoneNum];
+ 		_curVgaFile1 = vpe->vgaFile1;
+@@ -1539,7 +1581,7 @@ void AGOSEngine::setWindowImage(uint16 mode, uint16 vgaSpriteId, bool specialCas
  				dst += screen->pitch;
  			}
  
