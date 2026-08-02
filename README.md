@@ -17,6 +17,7 @@ AGOS 跟 SCUMM 不一樣 —— **丟字型檔進去是沒用的**。它的文�
 | `tools/` | 字型烘焙(TTF 與倚天點陣字)、疊層座標回歸測試、ASan 掃描 |
 | `docs/` | [**AGOS_PITFALLS.md**](docs/AGOS_PITFALLS.md) — 踩過的坑總覽,每條含根因與驗證方法 |
 | `docs/` | [**ASAN_GUIDE.md**](docs/ASAN_GUIDE.md) — 用 ASan 抓疊層越界:怎麼編、五個情境怎麼跑、報告怎麼讀 |
+| `docs/` | [**LOCALIZATION_SEMANTIC_ISOLATION.md**](docs/LOCALIZATION_SEMANTIC_ISOLATION.md) — 翻譯與腳本語意的責任邊界 |
 
 ## 核心解法:用 overlay 層當 hi-res compositor
 
@@ -73,10 +74,9 @@ patch 裡也包含一處 backend 的修正(`surfacesdl-graphics.cpp`):比例校�
 內含上界怎麼從實際資料量出來、為什麼加大陣列解決不了,以及一個假驗證的教訓。
 
 [`Can't load 002.VGA` 追查報告](https://github.com/wicanr2/Elvira-Mistress_of_the_Dark_1990-cht/blob/main/docs/BUG_002VGA_ZONE0.md)
-—— 玩家撞牆就中止,追到最後是遊戲腳本的條件分派缺預設分支,讓畫面編號停在 0。
-裡面有完整的反組譯過程(含 `dumpAllSubroutines()` 只 dump 記憶體現有子程式這個坑)、
-為什麼「把載入改成不致命」反而更糟,以及修法的驗證與有效性威脅。
-對應本 repo 的 `AGOS_PITFALLS.md` §3.7。
+—— 玩家繁中／英文對照證實，全域翻譯掛勾污染了敵人名稱的腳本比較，使戰鬥圖片
+編號停在 0。報告保留早期把問題誤判為資料漏洞與座標錯位的證據鏈，也說明為何
+「缺圖就略過」會把中止改成凍結。共用設計原則見 `LOCALIZATION_SEMANTIC_ISOLATION.md`。
 
 ## 授權
 

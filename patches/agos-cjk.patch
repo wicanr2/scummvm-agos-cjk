@@ -202,7 +202,7 @@ index af27f131..0a53f293 100644
  
  	if (getGameType() != GType_PP && getGameType() != GType_FF) {
 diff --git a/engines/agos/agos.h b/engines/agos/agos.h
-index 6a8d2237..bb141d62 100644
+index 6a8d2237..c2ce8094 100644
 --- a/engines/agos/agos.h
 +++ b/engines/agos/agos.h
 @@ -37,6 +37,7 @@
@@ -263,6 +263,15 @@ index 6a8d2237..bb141d62 100644
  	bool _vgaVar9;
  	int16 _chanceModifier;
  	bool _restoreWindow6;
+@@ -767,7 +811,7 @@ protected:
+ 	byte *uncompressToken(byte a, byte *ptr);
+ 
+ 	void showMessageFormat(MSVC_PRINTF const char *s, ...) GCC_PRINTF(2, 3);
+-	const byte *getStringPtrByID(uint16 stringId, bool upperCase = false);
++	const byte *getStringPtrByID(uint16 stringId, bool upperCase = false, bool localize = true);
+ 	const byte *getLocalStringByID(uint16 stringId);
+ 	uint getNextStringID();
+ 
 @@ -958,6 +1002,11 @@ protected:
  	void renderStringAmiga(uint vgaSpriteId, uint color, uint width, uint height, const char *txt);
  	void renderString(uint vgaSpriteId, uint color, uint width, uint height, const char *txt);
@@ -276,7 +285,7 @@ index 6a8d2237..bb141d62 100644
  
  	byte *allocBlock(uint32 size);
 diff --git a/engines/agos/charset-fontdata.cpp b/engines/agos/charset-fontdata.cpp
-index 193986e3..088212aa 100644
+index 193986e3..0eaf1d54 100644
 --- a/engines/agos/charset-fontdata.cpp
 +++ b/engines/agos/charset-fontdata.cpp
 @@ -22,12 +22,14 @@
@@ -294,7 +303,7 @@ index 193986e3..088212aa 100644
  
  namespace AGOS {
  
-@@ -2914,6 +2916,635 @@ static const byte english_pnFont[] = {
+@@ -2914,6 +2916,669 @@ static const byte english_pnFont[] = {
  	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
  };
  
@@ -641,7 +650,37 @@ index 193986e3..088212aa 100644
 +	uint32 cVerb   = fmt.RGBToColor(98, 97, 65);      // OPEN..THROW(與花邊同色系)
 +	uint32 cBright = fmt.RGBToColor(197, 194, 164);   // PAUSE/SAVE/RESTORE、ROOM/INV/WEAPONS
 +	uint32 cBlack = fmt.RGBToColor(0, 0, 0);
-+	// 整塊黑底(涵蓋整個文字區, 保證升採後的英文美術字全被蓋掉, 個別 Y 稍偏也不露)。
++	// 戰鬥時遊戲會把 0x78..0x81 改成另一組位置與 LUNGE/HACK/BLOCK/PARRY
++	// 等動態命令。只有一般動詞判定框仍在原始位置時才覆蓋 OPEN..THROW；
++	// 否則保留遊戲原本的戰鬥字樣，避免中文一般動詞把可點的戰鬥命令蓋掉。
++	HitArea *normalFirst = findBox(0x78);
++	HitArea *normalLast = findBox(0x81);
++	// GAMEPC 的第一格 OPEN 實際是 x=279,w=33；其餘才是 x=277,w=37。
++	// 判定框即使暫時 disabled 仍要顯示標籤，所以不以 dead flag 判斷模式。
++	bool normalVerbPanel = normalFirst && normalLast &&
++	        normalFirst->x == 279 && normalFirst->y == 9 && normalFirst->width == 33 &&
++	        normalLast->x == 277 && normalLast->y == 81 && normalLast->width == 37;
++	// 戰鬥命令不是另一套固定 hitarea；原遊戲會在同一欄疊紅底的動態命令。
++	// 以原始 320x200 畫面的紅色實際像素判斷，避免依角色、武器或腳本分支猜狀態。
++	// 一般選取框只有一條細紅線，戰鬥的 LUNGE/HACK/BLOCK/PARRY 是整塊紅底；
++	// 閾值 32 可把兩者分開。
++	int combatRedPixels = 0;
++	for (int py = 34; py < 96 && combatRedPixels <= 32; ++py) {
++		const byte *prow = src + py * gpitch;
++		for (int px = 276; px < 316; ++px) {
++			const byte pi = prow[px];
++			const int pr = _currentPalette[pi * 3];
++			const int pg = _currentPalette[pi * 3 + 1];
++			const int pb = _currentPalette[pi * 3 + 2];
++			if (pr >= 80 && pr > pg * 3 / 2 && pr > pb * 3 / 2)
++				++combatRedPixels;
++		}
++	}
++	if (combatRedPixels > 32)
++		normalVerbPanel = false;
++
++	// 整塊黑底(涵蓋文字區, 保證升採後的英文美術字被蓋掉)。一般動詞與
++	// 系統功能分開遮，戰鬥狀態仍可翻譯 PAUSE/SAVE/RESTORE。
 +	// 上下界貼齊「第一個/最後一個判定框」± 一點餘裕, 不可再往下吃 —— 否則會蓋掉
 +	// 狀態列右端的 EXP 數值(overlay y≈254-276)。
 +	// 右欄 OPEN..RESTORE: 判定框 y9..121(遊戲) → overlay 18..244, 取 16..246。
@@ -650,11 +689,15 @@ index 193986e3..088212aa 100644
 +	// 蓋掉了中文面板就變成一塊死黑。花邊位置由英文原版逐欄統計非黑像素定出(基準座標):
 +	//   右欄 花邊 544..551 / 文字 552..631 / 花邊 632..639
 +	//   左欄 花邊 0..8     / 文字 9..87    / 花邊 88..97
-+	chtOvlFill(_chtOvlBuf, nullptr, 552, 16, 80, 230, cBlack);   // 右欄 OPEN..RESTORE
++	if (normalVerbPanel)
++		chtOvlFill(_chtOvlBuf, nullptr, 552, 16, 80, 164, cBlack); // 右欄 OPEN..THROW
++	chtOvlFill(_chtOvlBuf, nullptr, 552, 196, 80, 50, cBlack);    // PAUSE/SAVE/RESTORE
 +	chtOvlFill(_chtOvlBuf, nullptr, 9, 22, 78, 68, cBlack);      // 左欄 ROOM/INV/WEAPONS
 +	int nAll = ARRAYSIZE(kRight) + ARRAYSIZE(kLeft);
 +	for (int li = 0; li < nAll; li++) {
 +		bool left = (li >= (int)ARRAYSIZE(kRight));
++		if (!left && li < 10 && !normalVerbPanel)
++			continue;
 +		const VLabel &L = left ? kLeft[li - (int)ARRAYSIZE(kRight)] : kRight[li];
 +		// x 置中於「文字帶」(不含花邊): 右欄 552..631 → 中心 592; 左欄 9..87 → 中心 48。
 +		// 2 字寬 = 2*fw, 故起點 = 中心 - fw。
@@ -1275,18 +1318,29 @@ index 00000000..2757ee8d
 +
 +#endif
 diff --git a/engines/agos/cursor.cpp b/engines/agos/cursor.cpp
-index 3cb73123..193d8e4e 100644
+index 3cb73123..06f8d78d 100644
 --- a/engines/agos/cursor.cpp
 +++ b/engines/agos/cursor.cpp
-@@ -546,6 +546,7 @@ void AGOSEngine::handleMouseMoved() {
+@@ -546,6 +546,18 @@ void AGOSEngine::handleMouseMoved() {
  
  	CursorMan.showMouse(true);
  	_mouse = _eventMan->getMousePos();
++	// 繁中合成器用 showOverlay(true)，讓可見 overlay 與滑鼠共用同一個
++	// active area。事件座標因而是 overlay 像素，交給 AGOS hitarea 前需
++	// 依實際尺寸比例還原成遊戲的 320x200；不可假設固定 2x 或 Retina 倍率。
++	if (_chtOverlayOn && _chtActive && _system->isOverlayVisible()) {
++		const int ow = _system->getOverlayWidth();
++		const int oh = _system->getOverlayHeight();
++		if (ow > 0 && oh > 0) {
++			_mouse.x = CLIP<int>((int64)_mouse.x * _screenWidth / ow, 0, _screenWidth - 1);
++			_mouse.y = CLIP<int>((int64)_mouse.y * _screenHeight / oh, 0, _screenHeight - 1);
++		}
++	}
 +	if (_chtHires) { _mouse.x >>= 1; _mouse.y >>= 1; }   // 非上游: 640x400→320x200 還原給 hitarea
  
  	if (getGameType() == GType_WW) {
  		if (_variableArray[51] != 0 && _mouseCursor != _variableArray[51]) {
-@@ -788,7 +789,7 @@ void AGOSEngine::initMouse() {
+@@ -788,7 +800,7 @@ void AGOSEngine::initMouse() {
  	_maxCursorWidth = 16;
  	_maxCursorHeight = 16;
  
@@ -1295,7 +1349,7 @@ index 3cb73123..193d8e4e 100644
  		_maxCursorWidth <<= 1;
  		_maxCursorHeight <<= 1;
  	}
-@@ -873,7 +874,7 @@ void AGOSEngine::drawMousePointer() {
+@@ -873,7 +885,7 @@ void AGOSEngine::drawMousePointer() {
  			src += 2;
  		}
  
@@ -1305,10 +1359,10 @@ index 3cb73123..193d8e4e 100644
  			uint8 ptch = 16;
  			uint16 *dst1 = &((uint16*)_mouseData)[16 * 16 * 2 - 1];
 diff --git a/engines/agos/draw.cpp b/engines/agos/draw.cpp
-index 944797f9..84902111 100644
+index 944797f9..4ecb147f 100644
 --- a/engines/agos/draw.cpp
 +++ b/engines/agos/draw.cpp
-@@ -842,6 +842,31 @@ void AGOSEngine::displayScreen() {
+@@ -842,6 +842,36 @@ void AGOSEngine::displayScreen() {
  
  	updateBackendSurface();
  
@@ -1331,7 +1385,12 @@ index 944797f9..84902111 100644
 +		// 舊寫法只看自己的 _chtOverlayOn 旗標(一設就不再管), overlay 被關掉後
 +		// 中文就永久消失、要重開遊戲才會回來(玩家 issue #2 的「縮放畫面後中文字會消失」)。
 +		if (!_chtOverlayOn || !_system->isOverlayVisible()) {
-+			_system->showOverlay(false);
++			// 中文合成器畫的是完整 overlay，而不是只蓋在遊戲 draw rect 內。
++			// 因此輸入也必須使用 overlay 的 active area；否則 4:3 校正、Retina
++			// 或視窗縮放讓 overlayDrawRect 與 gameDrawRect 不同時，畫面上的字與
++			// hitarea 會水平錯位。handleMouseMoved() 再把 overlay 座標還原成
++			// 320x200 遊戲座標。
++			_system->showOverlay(true);
 +			_chtOverlayOn = true;
 +		}
 +		chtOverlayCompose();
@@ -1394,7 +1453,7 @@ index db3ba144..e8bd8dbe 100644
  
  		if (amount == 0)
 diff --git a/engines/agos/gfx.cpp b/engines/agos/gfx.cpp
-index 06dfaef6..ee933925 100644
+index 06dfaef6..34e9ce9b 100644
 --- a/engines/agos/gfx.cpp
 +++ b/engines/agos/gfx.cpp
 @@ -32,6 +32,18 @@
@@ -1453,15 +1512,11 @@ index 06dfaef6..ee933925 100644
  		Graphics::Surface *screen = _system->lockScreen();
  
  		int src0Pitch = _backBuf->pitch;
-@@ -1138,6 +1166,31 @@ void AGOSEngine::animate(uint16 windowNum, uint16 zoneNum, uint16 vgaSpriteId, i
+@@ -1138,6 +1166,19 @@ void AGOSEngine::animate(uint16 windowNum, uint16 zoneNum, uint16 vgaSpriteId, i
  	vsp->id = vgaSpriteId;
  	vsp->zoneNum = zoneNum;
  
-+	// [agos-cjk 修正] 缺 zone 檔時不要 error() 把整個遊戲殺掉。
-+	// 玩家回報撞牆時偶發 "Can't load 002.VGA"(zone 0 = sprite id < 100, 該版本沒有這組檔),
-+	// 上游是直接 error() 中止 —— 對玩家而言等於一次當機、進度全失。
-+	// 注意不能只把 loadZone 改成非致命: 下面的 for(;;) 靠 vgaFile1 非 null 才跳出,
-+	// 載入失敗會變成無窮迴圈。所以在進迴圈前先試載一次, 真的沒有就跳過這張圖。
++	// [agos-cjk 防護] 在索引資源陣列之前先擋不可能的 zone 上界。
 +	// 上界先擋: 圖號是 16-bit(最多 65535), 除以 100 之後 zone 可到 655,
 +	// 而 _vgaBufferPointers 只有 450 個項目 —— 直接索引會越界讀。
 +	// 上游的 for(;;) 迴圈也是先取 &_vgaBufferPointers[zoneNum] 才進 loadZone 的
@@ -1474,26 +1529,14 @@ index 06dfaef6..ee933925 100644
 +		return;
 +	}
 +
-+	if (_vgaBufferPointers[zoneNum].vgaFile1 == nullptr) {
-+		loadZone(zoneNum, false);
-+		if (_vgaBufferPointers[zoneNum].vgaFile1 == nullptr) {
-+			warning("%s: zone %d 載不到(sprite id %d), 跳過此圖以免中止遊戲", __FUNCTION__, zoneNum, vgaSpriteId);
-+			return;
-+		}
-+	}
-+
  	for (;;) {
  		vpe = &_vgaBufferPointers[zoneNum];
  		_curVgaFile1 = vpe->vgaFile1;
-@@ -1224,6 +1277,31 @@ void AGOSEngine::setImage(uint16 vgaSpriteId, bool vgaScript) {
+@@ -1224,6 +1265,19 @@ void AGOSEngine::setImage(uint16 vgaSpriteId, bool vgaScript) {
  
  	zoneNum = (getGameType() == GType_PN) ? 0 : vgaSpriteId / 100;
  
-+	// [agos-cjk 修正] 缺 zone 檔時不要 error() 把整個遊戲殺掉。
-+	// 玩家回報撞牆時偶發 "Can't load 002.VGA"(zone 0 = sprite id < 100, 該版本沒有這組檔),
-+	// 上游是直接 error() 中止 —— 對玩家而言等於一次當機、進度全失。
-+	// 注意不能只把 loadZone 改成非致命: 下面的 for(;;) 靠 vgaFile1 非 null 才跳出,
-+	// 載入失敗會變成無窮迴圈。所以在進迴圈前先試載一次, 真的沒有就跳過這張圖。
++	// [agos-cjk 防護] 在索引資源陣列之前先擋不可能的 zone 上界。
 +	// 上界先擋: 圖號是 16-bit(最多 65535), 除以 100 之後 zone 可到 655,
 +	// 而 _vgaBufferPointers 只有 450 個項目 —— 直接索引會越界讀。
 +	// 上游的 for(;;) 迴圈也是先取 &_vgaBufferPointers[zoneNum] 才進 loadZone 的
@@ -1506,18 +1549,10 @@ index 06dfaef6..ee933925 100644
 +		return;
 +	}
 +
-+	if (_vgaBufferPointers[zoneNum].vgaFile1 == nullptr) {
-+		loadZone(zoneNum, false);
-+		if (_vgaBufferPointers[zoneNum].vgaFile1 == nullptr) {
-+			warning("%s: zone %d 載不到(sprite id %d), 跳過此圖以免中止遊戲", __FUNCTION__, zoneNum, vgaSpriteId);
-+			return;
-+		}
-+	}
-+
  	for (;;) {
  		vpe = &_vgaBufferPointers[zoneNum];
  		_curVgaFile1 = vpe->vgaFile1;
-@@ -1539,7 +1617,7 @@ void AGOSEngine::setWindowImage(uint16 mode, uint16 vgaSpriteId, bool specialCas
+@@ -1539,7 +1593,7 @@ void AGOSEngine::setWindowImage(uint16 mode, uint16 vgaSpriteId, bool specialCas
  				dst += screen->pitch;
  			}
  
@@ -1526,23 +1561,6 @@ index 06dfaef6..ee933925 100644
  				Common::Rect dirtyRect(0, 133, _screenWidth, _screenHeight);
  				updateBackendSurface(&dirtyRect);
  			}
-diff --git a/engines/agos/metaengine.cpp b/engines/agos/metaengine.cpp
-index be2d5090..6f1f34af 100644
---- a/engines/agos/metaengine.cpp
-+++ b/engines/agos/metaengine.cpp
-@@ -245,6 +245,12 @@ Common::KeymapArray AgosMetaEngine::initKeymaps(const char *target) const {
- 	act->setCustomEngineActionEvent(kActionExitCutscene);
- 	act->addDefaultInputMapping("ESCAPE");
- 	act->addDefaultInputMapping("JOY_Y");
-+	// 非上游: Elvira/Waxworks 原版手冊記載按 Enter 可跳過片頭, ScummVM 只綁 ESCAPE。
-+	// 補上 RETURN/KP_ENTER 以符合手冊與玩家預期(cutscene 期間 Enter 無其他用途)。
-+	if (gameId == "elvira1" || gameId == "elvira2" || gameId == "waxworks") {
-+		act->addDefaultInputMapping("RETURN");
-+		act->addDefaultInputMapping("KP_ENTER");
-+	}
- 	if (gameId == "simon2" || gameId == "feeble")
- 		act->addDefaultInputMapping("F5");
- 	engineKeyMap->addAction(act);
 diff --git a/engines/agos/module.mk b/engines/agos/module.mk
 index 37432e1e..be4c4ce4 100644
 --- a/engines/agos/module.mk
@@ -1579,7 +1597,7 @@ index ab214b27..56380a66 100644
  
  // Elvira 2 specific
 diff --git a/engines/agos/saveload.cpp b/engines/agos/saveload.cpp
-index b2095d1e..73e55fea 100644
+index b2095d1e..7d16d4d8 100644
 --- a/engines/agos/saveload.cpp
 +++ b/engines/agos/saveload.cpp
 @@ -258,17 +258,27 @@ bool AGOSEngine::confirmOverWrite(WindowBlock *window) {
@@ -1645,7 +1663,26 @@ index b2095d1e..73e55fea 100644
  
  	memset(_saveBuf, 0, 10);
  	name = _saveBuf;
-@@ -388,6 +411,9 @@ restart:
+@@ -340,7 +363,17 @@ restart:
+ 
+ 		while (!shouldQuit()) {
+ 			delay(10);
+-			if (_keyPressed.ascii && _keyPressed.ascii < 128) {
++			// Return/Enter may arrive with ascii == 0 (notably through some
++			// macOS keyboard/IME paths).  Keycode is the reliable signal for
++			// control keys; printable filename characters still use ascii.
++			if (_keyPressed.keycode == Common::KEYCODE_RETURN ||
++				_keyPressed.keycode == Common::KEYCODE_KP_ENTER) {
++				i = 13;
++				break;
++			} else if (_keyPressed.keycode == Common::KEYCODE_BACKSPACE) {
++				i = 8;
++				break;
++			} else if (_keyPressed.ascii && _keyPressed.ascii < 128) {
+ 				i = _keyPressed.ascii;
+ 				break;
+ 			}
+@@ -388,6 +421,9 @@ restart:
  	}
  
  	clearHiResTextLayer();
@@ -1655,7 +1692,7 @@ index b2095d1e..73e55fea 100644
  	restartAnimation();
  	_gameStoppedClock = getTime() - saveTime + _gameStoppedClock;
  }
-@@ -1018,6 +1044,17 @@ void AGOSEngine::fileError(WindowBlock *window, bool saveError) {
+@@ -1018,6 +1054,17 @@ void AGOSEngine::fileError(WindowBlock *window, bool saveError) {
  		}
  	}
  
@@ -1673,7 +1710,7 @@ index b2095d1e..73e55fea 100644
  	if (getGameType() == GType_ELVIRA1) {
  		printScroll();
  		window->textColumn = 0;
-@@ -1152,6 +1189,13 @@ bool AGOSEngine::loadGame(const Common::String &filename, bool restartMode) {
+@@ -1152,6 +1199,13 @@ bool AGOSEngine::loadGame(const Common::String &filename, bool restartMode) {
  
  	_videoLockOut &= ~0x100;
  
@@ -1688,7 +1725,7 @@ index b2095d1e..73e55fea 100644
  }
  
 diff --git a/engines/agos/script_e1.cpp b/engines/agos/script_e1.cpp
-index 629cede8..bc0b7988 100644
+index 629cede8..1337734e 100644
 --- a/engines/agos/script_e1.cpp
 +++ b/engines/agos/script_e1.cpp
 @@ -529,7 +529,7 @@ void AGOSEngine_Elvira1::oe1_moveDirn() {
@@ -1723,7 +1760,30 @@ index 629cede8..bc0b7988 100644
  	}
  }
  
-@@ -936,10 +937,21 @@ restart:
+@@ -610,7 +611,11 @@ void AGOSEngine_Elvira1::oe1_isCalled() {
+ 	// 135: childstruct fr2 is
+ 	Item *item = getNextItemPtr();
+ 	uint stringId = getNextStringID();
+-	setScriptCondition(!scumm_stricmp((const char *)getStringPtrByID(item->itemName), (const char *)getStringPtrByID(stringId)));
++	// 非上游：這是腳本語意比較，不是顯示文字。若先套用翻譯，原本只差大小寫的
++	// "The soldier" / "the soldier" 可能變成「那名士兵」/「士兵」，使敵人分類
++	// 失敗，戰鬥圖片變數保持 0，最後誤載不存在的 002.VGA。
++	setScriptCondition(!scumm_stricmp((const char *)getStringPtrByID(item->itemName, false, false),
++	                                    (const char *)getStringPtrByID(stringId, false, false)));
+ }
+ 
+ void AGOSEngine_Elvira1::oe1_cFlag() {
+@@ -686,7 +691,8 @@ void AGOSEngine_Elvira1::oe1_doorExit() {
+ void AGOSEngine_Elvira1::oe1_loadGame() {
+ 	// 202: load restart state
+ 	uint16 stringId = getNextStringID();
+-	loadGame((const char *)getStringPtrByID(stringId), true);
++	// 非上游：內部存檔名稱是資源識別字，不得套用顯示翻譯。
++	loadGame((const char *)getStringPtrByID(stringId, false, false), true);
+ }
+ 
+ void AGOSEngine_Elvira1::oe1_clearUserItem() {
+@@ -936,10 +942,21 @@ restart:
  		break;
  	}
  
@@ -1749,7 +1809,7 @@ index 629cede8..bc0b7988 100644
  
  	if (continueOrQuit() == 0x7FFE) {
  		printScroll();
-@@ -971,10 +983,19 @@ restart:
+@@ -971,10 +988,19 @@ restart:
  			break;
  		}
  
@@ -1773,7 +1833,7 @@ index 629cede8..bc0b7988 100644
  
  		if (confirmYesOrNo(120, 62) == 0x7FFF) {
  			quitGame();
-@@ -986,6 +1007,9 @@ restart:
+@@ -986,6 +1012,9 @@ restart:
  	}
  
  	clearHiResTextLayer();
@@ -1783,7 +1843,7 @@ index 629cede8..bc0b7988 100644
  	restartAnimation();
  	_gameStoppedClock = getTime() - pauseTime + _gameStoppedClock;
  }
-@@ -1041,20 +1065,22 @@ void AGOSEngine::lobjFunc(Item *i, const char *f) {
+@@ -1041,20 +1070,22 @@ void AGOSEngine::lobjFunc(Item *i, const char *f) {
  				showMessageFormat("%s", f);
  			n = 1;
  		} else {
@@ -1811,9 +1871,18 @@ index 629cede8..bc0b7988 100644
  }
  
 diff --git a/engines/agos/string.cpp b/engines/agos/string.cpp
-index 1aa590b8..1f94d443 100644
+index 1aa590b8..0ebb1356 100644
 --- a/engines/agos/string.cpp
 +++ b/engines/agos/string.cpp
+@@ -112,7 +112,7 @@ byte *AGOSEngine::uncompressToken(byte a, byte *ptr) {
+ 	return ptr;
+ }
+ 
+-const byte *AGOSEngine::getStringPtrByID(uint16 stringId, bool upperCase) {
++const byte *AGOSEngine::getStringPtrByID(uint16 stringId, bool upperCase, bool localize) {
+ 	const byte *stringPtr;
+ 	byte *dst;
+ 
 @@ -135,6 +135,26 @@ const byte *AGOSEngine::getStringPtrByID(uint16 stringId, bool upperCase) {
  		Common::strlcpy((char *)dst, (const char *)stringPtr, 180);
  	}
@@ -1821,7 +1890,7 @@ index 1aa590b8..1f94d443 100644
 +	// 非上游: 古堡禁地(Elvira 1)繁中注入 — 依 stringId 換成 Big5 完整譯文。
 +	// 提前 return, 避開下方 upperCase(toupper 會撞壞 Big5 lead byte)。
 +	// getStringPtrByID 是 A/B/C 類文字(物品名/敘述/對白)的共用 chokepoint。
-+	if (_chtActive && _chtSubLang == 1) {
++	if (localize && _chtActive && _chtSubLang == 1) {
 +		Common::HashMap<uint32, Common::String>::const_iterator it = _cht.table.find(stringId);
 +		if (it != _cht.table.end()) {
 +			_chtBufSlot ^= 1;
