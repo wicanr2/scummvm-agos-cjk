@@ -8,6 +8,72 @@ AGOS 跟 SCUMM 不一樣 —— **丟字型檔進去是沒用的**。它的文�
 所以 AGOS 的中文化一定要改引擎,而每個做這件事的人都會撞上同一批問題。
 這個 repo 就是把那批問題的解法集中起來,不必每款遊戲重踩一次。
 
+## ⚠️ 高成本事故警告：翻譯只能用於顯示，不能改變程式語意
+
+這條規則必須在開始中文化前就處理，不能等玩家當機後才補救。一次看似方便的
+「在 `getStringPtrByID()` 統一回傳譯文」，已在三款遊戲造成兩類完全不同的異常，
+並浪費大量除錯、編譯、跨平台打包與 AI token 成本：
+
+- **Elvira 1（已證實）**：腳本用英文敵人名稱做分類比較；全域翻譯改變比較值，
+  使戰鬥圖片編號停在 0，最後誤載不存在的 `002.VGA`。
+- **Elvira 2（已證實的程式路徑）**：`oe1_loadGame()` 的 `Start` 是重新開始狀態的
+  **實體檔名**，不是按鈕文字。翻成「開始」後，程式會嘗試開啟不存在的中文檔名。
+- **Waxworks（已證實的程式路徑）**：同一 opcode 使用 `START` 載入初始狀態；翻譯後
+  同樣找不到檔案，呼叫端又未中止流程，可能讓遊戲帶著殘留或未完成狀態繼續執行。
+
+根本原則只有一句：
+
+> **翻譯是顯示層資料；比較、檔名、資源鍵、存讀檔、序列化與腳本識別值必須保留原文。**
+
+正確 API 應讓顯示呼叫預設本地化，語意呼叫則明確停用本地化，例如：
+
+```cpp
+const byte *getStringPtrByID(uint16 stringId,
+                             bool upperCase = false,
+                             bool localize = true);
+
+// 顯示文字：允許翻譯
+showText(getStringPtrByID(stringId));
+
+// 內部檔名：必須取得原文
+loadGame((const char *)getStringPtrByID(stringId, false, false), true);
+```
+
+### 動手修改前的強制稽核
+
+不要只修已出錯的那個呼叫點。任何全域翻譯掛勾上線前，必須盤點其所有呼叫者，
+並至少分成以下兩組：
+
+| 用途 | 是否可翻譯 | 必查範例 |
+|---|---:|---|
+| 畫面、對話、選單、提示 | 是 | render、print、message、caption |
+| 條件比較、物件分類 | 否 | compare、isCalled、equals、switch key |
+| 檔案與資源查找 | 否 | loadGame、open、Path、VGA、zone、音訊名稱 |
+| 存讀檔與序列化 | 否 | save slot、restart state、config key、archive member |
+| 腳本與跨系統識別值 | 否 | opcode 參數、ID 對映、協定欄位 |
+
+建議先搜尋 `getStringPtrByID`、譯表查詢及所有等價入口，再沿每個呼叫點追到最終用途。
+如果用途無法立刻證明是顯示，就先按「不可翻譯」處理並記為待查，不能用調整個別譯文
+來配合隱藏規則。完整設計說明見
+[中文化的顯示與語意隔離](docs/LOCALIZATION_SEMANTIC_ISOLATION.md)。
+
+### 防止再次浪費 token 的最小驗收閘門
+
+1. **語意 A/B**：同一流程分別開啟／關閉翻譯；除畫面文字外，檔名、ID、分支與狀態必須一致。
+2. **負向測試**：故意把 `Start`／`START` 翻成完全不同的合理譯文，語意路徑仍須開啟原檔。
+3. **乾淨 patch**：從指定 ScummVM tag 套用 canonical patch；被忽略的 build tree 成功不算。
+4. **兩種套用器**：同時通過 `patch -p1 --dry-run` 與 `git apply --check`。兩者容錯不同；
+   本次 Waxworks patch 曾出現前者接受、後者判定 `corrupt patch`，造成一次無效 macOS CI。
+5. **乾淨完整編譯**：不能只看 patch 套用成功或單一物件檔編過。
+6. **玩家路徑與實際封包**：驗證受影響流程及 Linux、Windows、macOS 的真實成品；
+   Windows ZIP 另查 UTF-8 檔名旗標與 README UTF-8 BOM。
+7. **最後才跨平台重打包**：上述便宜閘門全部通過後才啟動 MinGW 與 macOS universal CI，
+   避免用昂貴建置反覆驗證本可由靜態稽核立即發現的錯誤。
+
+證據分級：Elvira 1 已有玩家繁中／英文 A/B 與 log 證實完整症狀；Elvira 2 與
+Waxworks 已由腳本 opcode、翻譯表、實體檔名及引擎呼叫鏈證實舊路徑必然查錯檔名，
+修正亦通過乾淨編譯與三平台建置，但不應把尚未取得的特定玩家症狀描述成已實機重現。
+
 ## 這裡有什麼
 
 | 目錄 | 內容 |
